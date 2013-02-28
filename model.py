@@ -2,7 +2,7 @@
 
 import struct
 import sys
-from PIL import Image
+from PIL import Image, ImageDraw
 
 class Model:
   def __init__(self):
@@ -42,13 +42,31 @@ class Model:
     m.flags = read_I(f)
     m.size = read_f(f)
 
-    m.skin = {
-      'animated': read_I(f) # like a bool
-    }
+    m.skin = { 'animated': read_I(f) } # like a bool
     if (m.skin['animated'] == 0):
       m.skin['data'] = f.read(m.skinwidth * m.skinheight)
     else:
       raise Exception("multiskins NYI")
+
+    m.tex_coords = []
+    for i in range(0, m.num_verts):
+      # coords are on a plane of skinwidth * skinheight. 0,0 is top left (?)
+      tex_coord = {
+        'onseam': read_I(f), # like a bool
+        's': read_I(f),
+        't': read_I(f)
+      }
+      m.tex_coords.append(tex_coord)
+
+    m.tris = []
+    for i in range(0, m.num_tris):
+      tri = {
+        'facesfront': read_I(f), # like bool
+        'vert_indices': [read_I(f), read_I(f), read_I(f)] # todo: point to actual verts?
+      }
+      m.tris.append(tri)
+
+    # read frames here
 
     f.close()
     return m
@@ -56,8 +74,23 @@ class Model:
 if __name__ == "__main__":
   print 'reading %s' % (sys.argv[1],)
   m = Model.open(sys.argv[1], sys.argv[2])
-  i = Image.fromstring("P", (m.skinwidth, m.skinheight), m.skin['data'],
+  img = Image.fromstring("P", (m.skinwidth, m.skinheight), m.skin['data'],
         'raw', 'P', 0, 1)
-  i.putpalette(m.pal)
-  i.save('skin.png', 'png')
+  img.putpalette(m.pal)
+  draw = ImageDraw.Draw(img)
+
+  for tri in m.tris:
+    e_sts = [] # effective st's (backface offsets added)
+    for i in range(0, 3):
+      st = m.tex_coords[tri['vert_indices'][i]]
+      e_st = {'s': st['s'], 't': st['t']}
+      if not tri['facesfront'] and st['onseam']:
+        e_st['s'] += m.skinwidth / 2
+      e_sts.append(e_st)
+    fill = 256
+    draw.line([e_sts[0]['s'], e_sts[0]['t'], e_sts[1]['s'], e_sts[1]['t']], fill=fill)
+    draw.line([e_sts[1]['s'], e_sts[1]['t'], e_sts[2]['s'], e_sts[2]['t']], fill=fill)
+    draw.line([e_sts[2]['s'], e_sts[2]['t'], e_sts[0]['s'], e_sts[0]['t']], fill=fill)
+
+  img.save('skin.png', 'png')
   # print vars(m)
